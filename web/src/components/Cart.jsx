@@ -4,6 +4,7 @@ export default function Cart({
   onRemove,
   onClear,
   onCheckout,
+  isMobile = false,
 }) {
   const KIOSK_FEE = 3.00
   const TAX_RATE = 0.0825
@@ -13,12 +14,14 @@ export default function Cart({
   const total = subtotal + KIOSK_FEE + tax
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      {/* Header */}
-      <div className="bg-wk-red text-white px-4 py-4 shrink-0">
-        <h2 className="text-2xl font-bold">Your Order</h2>
-        <p className="text-sm opacity-90">Items in cart: {items.length}</p>
-      </div>
+    <div className={`flex flex-col ${isMobile ? '' : 'h-full'} bg-gray-50`}>
+      {/* Header - hide on mobile since drawer has its own */}
+      {!isMobile && (
+        <div className="bg-wk-header text-white px-4 py-4 shrink-0">
+          <h2 className="text-xl font-semibold">Your Order</h2>
+          <p className="text-sm opacity-80">Items in cart: {items.length}</p>
+        </div>
+      )}
 
       {/* Items List */}
       <div className="flex-1 overflow-y-auto px-4 py-4">

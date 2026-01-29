@@ -4,7 +4,8 @@ module.exports = {
     extend: {
       colors: {
         'wk-red': '#DC2626',
-        'wk-dark': '#000000',
+        'wk-dark': '#1a1a1a',
+        'wk-header': '#1a1a1a',
       },
       fontSize: {
         'xs': ['12px', '16px'],

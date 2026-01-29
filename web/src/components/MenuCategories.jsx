@@ -12,14 +12,16 @@ export default function MenuCategories({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Category Tabs */}
-      <div className="bg-white border-b border-gray-300 overflow-x-auto scrollbar-hide">
-        <div className="flex gap-2 px-4 py-2 min-w-min">
+      <div className="bg-white border-b border-gray-200 overflow-x-auto scrollbar-hide">
+        <div className="flex gap-0 px-2 md:px-4 py-0 min-w-min">
           {categories.map(category => (
             <button
               key={category}
               onClick={() => onSelectCategory(category)}
-              className={`menu-category-tab ${
-                selectedCategory === category ? 'active' : ''
+              className={`px-3 md:px-5 py-3 md:py-4 text-sm md:text-base font-medium transition-colors duration-200 whitespace-nowrap ${
+                selectedCategory === category
+                  ? 'text-wk-red border-b-[3px] border-wk-red'
+                  : 'text-gray-600 border-b-[3px] border-transparent hover:text-gray-900'
               }`}
             >
               {category}
@@ -28,9 +30,9 @@ export default function MenuCategories({
         </div>
       </div>
 
-      {/* Menu Items Grid */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="grid grid-cols-2 gap-4 auto-rows-max">
+      {/* Menu Items */}
+      <div className="flex-1 overflow-y-auto bg-gray-50 pb-20 md:pb-0">
+        <div className="divide-y divide-gray-200 bg-white mx-2 md:mx-4 my-2 md:my-4 rounded-lg shadow-sm">
           {currentItems.map(item => (
             <MenuItem
               key={item.id}

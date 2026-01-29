@@ -2,20 +2,15 @@ export default function MenuItem({ item, onAddToCart }) {
   return (
     <button
       onClick={() => onAddToCart(item)}
-      className="menu-item-card text-left group"
+      className="w-full text-left px-3 md:px-5 py-3 md:py-4 hover:bg-gray-50 transition-colors duration-150 active:bg-gray-100 min-h-touch"
     >
-      <div className="flex flex-col gap-2">
-        <div className="flex justify-between items-start gap-2">
-          <h3 className="text-lg font-semibold text-gray-900 flex-1 group-hover:text-wk-red transition-colors">
-            {item.name}
-          </h3>
-          <span className="text-wk-red font-bold text-xl whitespace-nowrap">
-            ${item.price.toFixed(2)}
-          </span>
-        </div>
-        <div className="text-sm text-gray-500 group-hover:text-wk-red transition-colors">
-          Tap to add
-        </div>
+      <div className="flex justify-between items-center gap-3">
+        <span className="text-gray-900 text-sm md:text-base">
+          {item.name}
+        </span>
+        <span className="text-gray-900 font-medium text-sm md:text-base whitespace-nowrap">
+          ${item.price.toFixed(2)}
+        </span>
       </div>
     </button>
   )

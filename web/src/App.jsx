@@ -10,6 +10,9 @@ export default function App() {
   const [cart, setCart] = useState([])
   const [showCheckout, setShowCheckout] = useState(false)
   const [orderConfirmation, setOrderConfirmation] = useState(null)
+  const [showMobileCart, setShowMobileCart] = useState(false)
+
+  const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
 
   const addToCart = (item) => {
     setCart(prevCart => {
@@ -73,16 +76,9 @@ export default function App() {
   return (
     <div className="kiosk-container bg-white">
       {/* Header */}
-      <div className="bg-wk-red text-white px-6 py-4 shadow-lg">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-4xl font-bold">Walter's Kitchen</h1>
-            <p className="text-sm opacity-90">Food Ordering Kiosk</p>
-          </div>
-          <div className="text-right text-sm">
-            <p className="font-semibold">8010 N Stemmons Fwy, Dallas, TX</p>
-            <p>(469) 489-4654</p>
-          </div>
+      <div className="bg-wk-header text-white px-4 md:px-6 py-2 md:py-3 shadow-lg">
+        <div className="flex items-center">
+          <img src="/logo.svg" alt="Walter's Kitchen Restaurant & Bar" className="h-10 md:h-14" />
         </div>
       </div>
 
@@ -99,8 +95,8 @@ export default function App() {
           />
         </div>
 
-        {/* Cart Section */}
-        <div className="w-80 border-l border-gray-300 bg-gray-50 flex flex-col">
+        {/* Cart Section - Desktop */}
+        <div className="hidden md:flex w-80 border-l border-gray-300 bg-gray-50 flex-col">
           <Cart
             items={cart}
             onUpdateQuantity={updateQuantity}
@@ -110,6 +106,53 @@ export default function App() {
           />
         </div>
       </div>
+
+      {/* Mobile Cart Button */}
+      {cartItemCount > 0 && (
+        <button
+          onClick={() => setShowMobileCart(true)}
+          className="md:hidden fixed bottom-4 left-4 right-4 bg-wk-red text-white py-4 rounded-lg font-semibold text-lg shadow-lg flex items-center justify-center gap-2"
+        >
+          <span>View Cart</span>
+          <span className="bg-white text-wk-red px-2 py-0.5 rounded-full text-sm font-bold">
+            {cartItemCount}
+          </span>
+        </button>
+      )}
+
+      {/* Mobile Cart Drawer */}
+      {showMobileCart && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowMobileCart(false)}
+          />
+          <div className="relative mt-auto bg-white rounded-t-2xl max-h-[85vh] flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h2 className="text-lg font-semibold">Your Order</h2>
+              <button
+                onClick={() => setShowMobileCart(false)}
+                className="p-2 text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <Cart
+                items={cart}
+                onUpdateQuantity={updateQuantity}
+                onRemove={removeFromCart}
+                onClear={clearCart}
+                onCheckout={() => {
+                  setShowMobileCart(false)
+                  setShowCheckout(true)
+                }}
+                isMobile={true}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
