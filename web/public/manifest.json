@@ -1,0 +1,58 @@
+{
+  "name": "Walter's Kitchen Food Ordering Kiosk",
+  "short_name": "Walter's Kitchen",
+  "description": "Progressive Web App for ordering food at Walter's Kitchen Restaurant & Bar",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#ffffff",
+  "theme_color": "#DC2626",
+  "categories": ["food", "restaurants"],
+  "screenshots": [
+    {
+      "src": "/screenshots/1024x768.png",
+      "sizes": "1024x768",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Place an Order",
+      "short_name": "Order",
+      "description": "Start ordering food from Walter's Kitchen",
+      "url": "/?action=order",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

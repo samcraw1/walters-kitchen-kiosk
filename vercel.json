@@ -1,0 +1,25 @@
+{
+  "buildCommand": "cd web && npm run build",
+  "outputDirectory": "web/dist",
+  "env": {
+    "VITE_STRIPE_PUBLISHABLE_KEY": "@stripe_publishable_key",
+    "VITE_API_URL": "@api_url"
+  },
+  "framework": "vite",
+  "regions": ["sfo1"],
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "nodejs18.x",
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "redirects": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://your-api-domain.com/api/:path*"
+    }
+  ],
+  "cleanUrls": true,
+  "trailingSlash": false
+}

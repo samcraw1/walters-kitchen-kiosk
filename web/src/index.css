@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  @apply bg-white text-gray-900;
+  font-size: 16px;
+}
+
+.kiosk-container {
+  @apply w-full h-screen flex flex-col overflow-hidden;
+}
+
+.menu-category-tab {
+  @apply min-h-touch min-w-touch px-4 py-2 text-base font-semibold transition-colors duration-200;
+}
+
+.menu-category-tab.active {
+  @apply bg-wk-red text-white border-b-4 border-wk-red;
+}
+
+.menu-category-tab:not(.active) {
+  @apply bg-gray-100 text-gray-700 hover:bg-gray-200;
+}
+
+.menu-item-card {
+  @apply bg-white border border-gray-200 rounded-lg p-4 cursor-pointer transition-all duration-200 hover:shadow-lg hover:border-wk-red min-h-touch;
+}
+
+.menu-item-card:active {
+  @apply transform scale-95;
+}
+
+.cart-item {
+  @apply flex items-center justify-between py-3 border-b border-gray-200;
+}
+
+.quantity-button {
+  @apply min-h-touch min-w-touch rounded bg-gray-200 hover:bg-gray-300 transition-colors duration-200 flex items-center justify-center font-semibold;
+}
+
+.checkout-button {
+  @apply bg-wk-red text-white font-bold text-lg rounded-lg w-full py-4 min-h-touch hover:bg-red-700 transition-colors duration-200 disabled:bg-gray-300 disabled:cursor-not-allowed;
+}
+
+.input-field {
+  @apply w-full px-4 py-3 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-wk-red focus:border-transparent;
+}
+
+.section-title {
+  @apply text-2xl font-bold text-gray-900 mb-4;
+}
+
+/* iPad Landscape Optimizations */
+@media (min-width: 1024px) and (orientation: landscape) {
+  .kiosk-container {
+    @apply flex-row;
+  }
+
+  .menu-section {
+    @apply flex-1 overflow-y-auto;
+  }
+
+  .cart-section {
+    @apply w-80 border-l border-gray-300;
+  }
+}
+
+/* Disable text selection on kiosk */
+.kiosk-container {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Loading spinner */
+.spinner {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #DC2626;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}

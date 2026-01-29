@@ -1,0 +1,17 @@
+{
+  "name": "walters-kitchen-kiosk",
+  "version": "1.0.0",
+  "description": "Progressive Web App food ordering kiosk for Walter's Kitchen Restaurant & Bar",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "cd api && node server.js",
+    "dev:web": "cd web && npm start",
+    "build": "npm run build:web && npm run build:api",
+    "build:web": "cd web && npm run build",
+    "build:api": "cd api && npm install",
+    "start": "cd api && node server.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0"
+  }
+}
