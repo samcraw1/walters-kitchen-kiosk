@@ -1,34 +1,81 @@
-import { useState } from 'react'
-import { loadStripe } from '@stripe/stripe-js'
-import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
+import { useState, useEffect, useRef } from 'react'
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_demo')
+const API_URL = import.meta.env.VITE_API_URL || '/api'
 
 export default function CheckoutForm({ total, onSuccess, onCancel, isProcessing, error }) {
-  return (
-    <Elements stripe={stripePromise}>
-      <CheckoutFormContent
-        total={total}
-        onSuccess={onSuccess}
-        onCancel={onCancel}
-        isProcessing={isProcessing}
-        error={error}
-      />
-    </Elements>
-  )
-}
-
-function CheckoutFormContent({ total, onSuccess, onCancel, isProcessing, error }) {
-  const stripe = useStripe()
-  const elements = useElements()
   const [cardError, setCardError] = useState('')
   const [processing, setProcessing] = useState(false)
+  const [squareReady, setSquareReady] = useState(false)
+  const [squareConfig, setSquareConfig] = useState(null)
+  const cardRef = useRef(null)
+  const paymentsRef = useRef(null)
+
+  // Load Square config and SDK
+  useEffect(() => {
+    const loadSquare = async () => {
+      try {
+        // Fetch Square config from API
+        const res = await fetch(`${API_URL}/square/config`)
+        const config = await res.json()
+        setSquareConfig(config)
+
+        // Load Square SDK
+        const sdkUrl = config.environment === 'production'
+          ? 'https://web.squarecdn.com/v1/square.js'
+          : 'https://sandbox.web.squarecdn.com/v1/square.js'
+
+        // Check if already loaded
+        if (window.Square) {
+          initializeSquare(config)
+          return
+        }
+
+        const script = document.createElement('script')
+        script.src = sdkUrl
+        script.onload = () => initializeSquare(config)
+        script.onerror = () => setCardError('Failed to load payment system')
+        document.head.appendChild(script)
+      } catch (err) {
+        console.error('Square load error:', err)
+        setCardError('Failed to initialize payment')
+      }
+    }
+
+    loadSquare()
+
+    return () => {
+      if (cardRef.current) {
+        cardRef.current.destroy()
+      }
+    }
+  }, [])
+
+  const initializeSquare = async (config) => {
+    try {
+      if (!window.Square) {
+        setCardError('Payment system not available')
+        return
+      }
+
+      const payments = window.Square.payments(config.applicationId, config.locationId)
+      paymentsRef.current = payments
+
+      const card = await payments.card()
+      await card.attach('#card-container')
+      cardRef.current = card
+
+      setSquareReady(true)
+    } catch (err) {
+      console.error('Square init error:', err)
+      setCardError('Failed to initialize card form')
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
 
-    if (!stripe || !elements) {
-      setCardError('Stripe is not loaded')
+    if (!cardRef.current || !squareReady) {
+      setCardError('Payment form not ready')
       return
     }
 
@@ -36,30 +83,37 @@ function CheckoutFormContent({ total, onSuccess, onCancel, isProcessing, error }
     setCardError('')
 
     try {
-      // Create payment intent
-      const response = await fetch('/api/create-payment-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: total, currency: 'usd' }),
-      })
+      // Tokenize the card
+      const result = await cardRef.current.tokenize()
 
-      const { clientSecret } = await response.json()
+      if (result.status === 'OK') {
+        // Process payment via our API
+        const response = await fetch(`${API_URL}/square/payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceId: result.token,
+            amount: total,
+            currency: 'USD',
+          }),
+        })
 
-      // Confirm payment
-      const result = await stripe.confirmCardPayment(clientSecret, {
-        payment_method: {
-          card: elements.getElement(CardElement),
-        },
-      })
+        const paymentResult = await response.json()
 
-      if (result.error) {
-        setCardError(result.error.message)
+        if (paymentResult.success) {
+          onSuccess(paymentResult.paymentId)
+        } else {
+          setCardError(paymentResult.error || 'Payment failed')
+          setProcessing(false)
+        }
+      } else {
+        const errors = result.errors.map(e => e.message).join(', ')
+        setCardError(errors || 'Card validation failed')
         setProcessing(false)
-      } else if (result.paymentIntent.status === 'succeeded') {
-        onSuccess(result.paymentIntent.id)
       }
     } catch (err) {
-      setCardError(err.message)
+      console.error('Payment error:', err)
+      setCardError(err.message || 'Payment processing failed')
       setProcessing(false)
     }
   }
@@ -88,28 +142,19 @@ function CheckoutFormContent({ total, onSuccess, onCancel, isProcessing, error }
               </div>
             )}
 
-            <div className="border-2 border-gray-300 rounded-lg p-6 bg-white">
-              <CardElement
-                options={{
-                  style: {
-                    base: {
-                      fontSize: '20px',
-                      color: '#000000',
-                      '::placeholder': {
-                        color: '#999999',
-                      },
-                    },
-                    invalid: {
-                      color: '#DC2626',
-                    },
-                  },
-                }}
-              />
+            <div className="border-2 border-gray-300 rounded-lg p-6 bg-white min-h-[60px]">
+              <div id="card-container"></div>
+              {!squareReady && (
+                <div className="flex items-center justify-center py-2">
+                  <div className="spinner"></div>
+                  <span className="ml-2 text-gray-500">Loading...</span>
+                </div>
+              )}
             </div>
 
             <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm font-semibold text-blue-900">
-                Test card: 4242 4242 4242 4242 (any future date, any CVC)
+                Test card: 4532 0123 4567 8901 (any future date, any CVC, any ZIP)
               </p>
             </div>
           </div>
@@ -118,7 +163,7 @@ function CheckoutFormContent({ total, onSuccess, onCancel, isProcessing, error }
         <div className="border-t border-gray-300 px-6 py-4 space-y-3">
           <button
             type="submit"
-            disabled={!stripe || processing || isProcessing}
+            disabled={!squareReady || processing || isProcessing}
             className="checkout-button"
           >
             {processing || isProcessing ? (

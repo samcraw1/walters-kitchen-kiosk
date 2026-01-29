@@ -1,17 +1,23 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import Stripe from 'stripe';
+import { Client, Environment } from 'square';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+// Initialize Square
+const squareClient = new Client({
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: process.env.SQUARE_ENVIRONMENT === 'production'
+    ? Environment.Production
+    : Environment.Sandbox,
+});
 
 // Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -48,7 +54,6 @@ app.get('/api/menu', async (req, res) => {
       return res.status(503).json({ error: 'Database not configured' });
     }
 
-    // Get categories
     const { data: categories, error: catError } = await supabase
       .from('menu_categories')
       .select('*')
@@ -56,7 +61,6 @@ app.get('/api/menu', async (req, res) => {
 
     if (catError) throw catError;
 
-    // Get items
     const { data: items, error: itemError } = await supabase
       .from('menu_items')
       .select('*')
@@ -65,7 +69,6 @@ app.get('/api/menu', async (req, res) => {
 
     if (itemError) throw itemError;
 
-    // Group items by category
     const menuData = {};
     categories.forEach(cat => {
       menuData[cat.name] = items
@@ -87,7 +90,6 @@ app.get('/api/menu', async (req, res) => {
 
 // ============ ADMIN MENU ENDPOINTS ============
 
-// Get all categories (admin)
 app.get('/api/admin/categories', adminAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -103,7 +105,6 @@ app.get('/api/admin/categories', adminAuth, async (req, res) => {
   }
 });
 
-// Create category
 app.post('/api/admin/categories', adminAuth, async (req, res) => {
   try {
     const { name, sort_order } = req.body;
@@ -121,7 +122,6 @@ app.post('/api/admin/categories', adminAuth, async (req, res) => {
   }
 });
 
-// Update category
 app.put('/api/admin/categories/:id', adminAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -141,7 +141,6 @@ app.put('/api/admin/categories/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Delete category
 app.delete('/api/admin/categories/:id', adminAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -158,7 +157,6 @@ app.delete('/api/admin/categories/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Get all items (admin - includes unavailable)
 app.get('/api/admin/items', adminAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -174,7 +172,6 @@ app.get('/api/admin/items', adminAuth, async (req, res) => {
   }
 });
 
-// Create item
 app.post('/api/admin/items', adminAuth, async (req, res) => {
   try {
     const { category_id, name, price, description, available, sort_order } = req.body;
@@ -199,7 +196,6 @@ app.post('/api/admin/items', adminAuth, async (req, res) => {
   }
 });
 
-// Update item
 app.put('/api/admin/items/:id', adminAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -219,7 +215,6 @@ app.put('/api/admin/items/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Delete item
 app.delete('/api/admin/items/:id', adminAuth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -238,7 +233,6 @@ app.delete('/api/admin/items/:id', adminAuth, async (req, res) => {
 
 // ============ SETTINGS ENDPOINTS ============
 
-// Get settings (admin)
 app.get('/api/admin/settings', adminAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -247,7 +241,6 @@ app.get('/api/admin/settings', adminAuth, async (req, res) => {
 
     if (error) throw error;
 
-    // Convert to object
     const settings = {};
     data.forEach(row => {
       settings[row.setting_key] = row.setting_value;
@@ -260,7 +253,6 @@ app.get('/api/admin/settings', adminAuth, async (req, res) => {
   }
 });
 
-// Update setting
 app.put('/api/admin/settings/:key', adminAuth, async (req, res) => {
   try {
     const { key } = req.params;
@@ -280,135 +272,209 @@ app.put('/api/admin/settings/:key', adminAuth, async (req, res) => {
   }
 });
 
-// ============ STRIPE CONNECT ENDPOINTS ============
+// ============ SQUARE ENDPOINTS ============
 
-// Create Stripe Connect account link (for onboarding)
-app.post('/api/admin/stripe/connect', adminAuth, async (req, res) => {
-  try {
-    const { return_url } = req.body;
-
-    // Check if we already have a connected account
-    const { data: settings } = await supabase
-      .from('kiosk_settings')
-      .select('setting_value')
-      .eq('setting_key', 'stripe_connected_account_id')
-      .single();
-
-    let accountId = settings?.setting_value;
-
-    // Create new account if none exists
-    if (!accountId) {
-      const account = await stripe.accounts.create({
-        type: 'express',
-        country: 'US',
-        capabilities: {
-          card_payments: { requested: true },
-          transfers: { requested: true },
-        },
-      });
-      accountId = account.id;
-
-      // Save account ID
-      await supabase
-        .from('kiosk_settings')
-        .upsert({ setting_key: 'stripe_connected_account_id', setting_value: accountId });
-    }
-
-    // Create account link for onboarding
-    const accountLink = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: return_url,
-      return_url: return_url,
-      type: 'account_onboarding',
-    });
-
-    res.json({ url: accountLink.url, accountId });
-  } catch (error) {
-    console.error('Stripe Connect error:', error);
-    res.status(500).json({ error: 'Failed to create Stripe Connect link' });
-  }
+// Get Square config for frontend
+app.get('/api/square/config', (req, res) => {
+  res.json({
+    applicationId: process.env.SQUARE_APPLICATION_ID,
+    locationId: process.env.SQUARE_LOCATION_ID,
+    environment: process.env.SQUARE_ENVIRONMENT || 'sandbox',
+  });
 });
 
-// Check Stripe Connect status
-app.get('/api/admin/stripe/status', adminAuth, async (req, res) => {
+// Process Square payment
+app.post('/api/square/payment', async (req, res) => {
   try {
-    const { data: settings } = await supabase
-      .from('kiosk_settings')
-      .select('setting_value')
-      .eq('setting_key', 'stripe_connected_account_id')
-      .single();
+    const { sourceId, amount, currency = 'USD' } = req.body;
 
-    if (!settings?.setting_value) {
-      return res.json({ connected: false });
-    }
+    const idempotencyKey = crypto.randomUUID();
 
-    const account = await stripe.accounts.retrieve(settings.setting_value);
+    const { result } = await squareClient.paymentsApi.createPayment({
+      sourceId,
+      idempotencyKey,
+      amountMoney: {
+        amount: BigInt(Math.round(amount * 100)),
+        currency,
+      },
+      locationId: process.env.SQUARE_LOCATION_ID,
+    });
 
     res.json({
-      connected: true,
-      accountId: account.id,
-      chargesEnabled: account.charges_enabled,
-      payoutsEnabled: account.payouts_enabled,
-      detailsSubmitted: account.details_submitted,
+      success: true,
+      paymentId: result.payment.id,
+      status: result.payment.status,
     });
   } catch (error) {
-    console.error('Stripe status error:', error);
-    res.status(500).json({ error: 'Failed to check Stripe status' });
+    console.error('Square payment error:', error);
+    res.status(500).json({ error: 'Payment processing failed' });
   }
 });
 
-// ============ PAYMENT ENDPOINTS ============
-
-// Create Payment Intent (with split payment support)
-app.post('/api/create-payment-intent', async (req, res) => {
+// Get Square OAuth URL for merchant connection
+app.get('/api/admin/square/auth-url', adminAuth, async (req, res) => {
   try {
-    const { amount, currency = 'usd' } = req.body;
+    const state = crypto.randomBytes(16).toString('hex');
 
-    // Get connected account and kiosk fee from settings
-    let connectedAccountId = null;
-    let kioskFee = 3.00;
-
+    // Store state for verification
     if (supabase) {
-      const { data: settings } = await supabase
-        .from('kiosk_settings')
-        .select('*');
-
-      settings?.forEach(s => {
-        if (s.setting_key === 'stripe_connected_account_id') {
-          connectedAccountId = s.setting_value;
-        }
-        if (s.setting_key === 'kiosk_fee') {
-          kioskFee = parseFloat(s.setting_value) || 3.00;
-        }
+      await supabase.from('kiosk_settings').upsert({
+        setting_key: 'square_oauth_state',
+        setting_value: state,
       });
     }
 
-    const paymentIntentParams = {
-      amount: Math.round(amount * 100),
-      currency,
-      automatic_payment_methods: { enabled: true },
-    };
+    const baseUrl = process.env.SQUARE_ENVIRONMENT === 'production'
+      ? 'https://connect.squareup.com'
+      : 'https://connect.squareupsandbox.com';
 
-    // If connected account exists, split the payment
-    if (connectedAccountId) {
-      paymentIntentParams.application_fee_amount = Math.round(kioskFee * 100);
-      paymentIntentParams.transfer_data = {
-        destination: connectedAccountId,
-      };
+    // Use the frontend URL for redirect
+    const redirectUri = process.env.SQUARE_REDIRECT_URI || 'http://localhost:5173/admin';
+
+    const authUrl = `${baseUrl}/oauth2/authorize?` +
+      `client_id=${process.env.SQUARE_APPLICATION_ID}&` +
+      `scope=PAYMENTS_WRITE+PAYMENTS_READ+MERCHANT_PROFILE_READ&` +
+      `session=false&` +
+      `state=${state}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+    res.json({ url: authUrl, state });
+  } catch (error) {
+    console.error('Square auth-url error:', error);
+    res.status(500).json({ error: 'Failed to generate auth URL' });
+  }
+});
+
+// Square OAuth callback (GET method to handle redirect from Square)
+app.get('/api/admin/square/callback', adminAuth, async (req, res) => {
+  try {
+    const { code, state } = req.query;
+
+    // Verify state
+    if (supabase) {
+      const { data: storedState } = await supabase
+        .from('kiosk_settings')
+        .select('setting_value')
+        .eq('setting_key', 'square_oauth_state')
+        .single();
+
+      if (storedState?.setting_value !== state) {
+        return res.status(400).json({ error: 'Invalid OAuth state' });
+      }
     }
 
-    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
+    const baseUrl = process.env.SQUARE_ENVIRONMENT === 'production'
+      ? 'https://connect.squareup.com'
+      : 'https://connect.squareupsandbox.com';
 
-    res.json({ clientSecret: paymentIntent.client_secret });
+    const redirectUri = process.env.SQUARE_REDIRECT_URI || 'http://localhost:5173/admin';
+
+    const response = await fetch(`${baseUrl}/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Square-Version': '2024-01-18',
+      },
+      body: JSON.stringify({
+        client_id: process.env.SQUARE_APPLICATION_ID,
+        client_secret: process.env.SQUARE_ACCESS_TOKEN,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.access_token) {
+      // Save merchant tokens
+      await supabase.from('kiosk_settings').upsert([
+        { setting_key: 'square_merchant_id', setting_value: data.merchant_id },
+        { setting_key: 'square_merchant_access_token', setting_value: data.access_token },
+        { setting_key: 'square_merchant_refresh_token', setting_value: data.refresh_token },
+      ]);
+
+      // Clear the oauth state
+      await supabase.from('kiosk_settings').delete().eq('setting_key', 'square_oauth_state');
+
+      res.json({ success: true, merchantId: data.merchant_id });
+    } else {
+      res.status(400).json({ error: data.message || 'OAuth failed' });
+    }
   } catch (error) {
-    console.error('Payment intent error:', error);
-    res.status(500).json({ error: 'Payment processing failed' });
+    console.error('Square OAuth error:', error);
+    res.status(500).json({ error: 'OAuth callback failed' });
+  }
+});
+
+// Disconnect Square merchant
+app.post('/api/admin/square/disconnect', adminAuth, async (req, res) => {
+  try {
+    await supabase.from('kiosk_settings').delete()
+      .in('setting_key', [
+        'square_merchant_id',
+        'square_merchant_access_token',
+        'square_merchant_refresh_token',
+      ]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Square disconnect error:', error);
+    res.status(500).json({ error: 'Failed to disconnect' });
+  }
+});
+
+// Check Square connection status
+app.get('/api/admin/square/status', adminAuth, async (req, res) => {
+  try {
+    const { data: settings } = await supabase
+      .from('kiosk_settings')
+      .select('*')
+      .in('setting_key', ['square_merchant_id', 'square_merchant_access_token']);
+
+    const settingsMap = {};
+    settings?.forEach(s => {
+      settingsMap[s.setting_key] = s.setting_value;
+    });
+
+    if (settingsMap.square_merchant_id && settingsMap.square_merchant_access_token) {
+      // Try to get merchant info from Square
+      let businessName = null;
+      let locationId = null;
+      try {
+        const merchantClient = new Client({
+          accessToken: settingsMap.square_merchant_access_token,
+          environment: process.env.SQUARE_ENVIRONMENT === 'production'
+            ? Environment.Production
+            : Environment.Sandbox,
+        });
+
+        const { result } = await merchantClient.merchantsApi.retrieveMerchant(settingsMap.square_merchant_id);
+        businessName = result.merchant?.businessName;
+
+        const { result: locResult } = await merchantClient.locationsApi.listLocations();
+        locationId = locResult.locations?.[0]?.id;
+      } catch (e) {
+        console.error('Failed to fetch merchant info:', e);
+      }
+
+      res.json({
+        connected: true,
+        merchantId: settingsMap.square_merchant_id,
+        businessName,
+        locationId,
+      });
+    } else {
+      res.json({ connected: false });
+    }
+  } catch (error) {
+    console.error('Square status error:', error);
+    res.status(500).json({ error: 'Failed to check status' });
   }
 });
 
 // ============ PRINTNODE ENDPOINTS ============
 
-// Generate receipt text
 function generateReceipt(order) {
   const { orderNumber, items, subtotal, tax, kioskFee, total, customerName, customerPhone, deliveryLocation } = order;
   const date = new Date().toLocaleString('en-US', {
@@ -456,7 +522,6 @@ TOTAL:${' '.repeat(17)}$${total.toFixed(2)}
   return receipt;
 }
 
-// Send print job to PrintNode
 async function sendPrintJob(receipt, printNodeApiKey, printerId) {
   if (!printNodeApiKey || !printerId) {
     console.log('PrintNode not configured, skipping print');
@@ -494,10 +559,8 @@ async function sendPrintJob(receipt, printNodeApiKey, printerId) {
   }
 }
 
-// Test print endpoint
 app.post('/api/admin/print/test', adminAuth, async (req, res) => {
   try {
-    // Get PrintNode settings
     const { data: settings } = await supabase
       .from('kiosk_settings')
       .select('*');
@@ -514,7 +577,6 @@ app.post('/api/admin/print/test', adminAuth, async (req, res) => {
       return res.status(400).json({ error: 'PrintNode not configured' });
     }
 
-    // Generate test receipt
     const testOrder = {
       orderNumber: 'TEST001',
       items: [
@@ -544,7 +606,6 @@ app.post('/api/admin/print/test', adminAuth, async (req, res) => {
   }
 });
 
-// Get PrintNode printers (to help user find printer ID)
 app.get('/api/admin/print/printers', adminAuth, async (req, res) => {
   try {
     const { data: settings } = await supabase
@@ -577,7 +638,6 @@ app.get('/api/admin/print/printers', adminAuth, async (req, res) => {
 
 // ============ ORDER ENDPOINTS ============
 
-// Create Order
 app.post('/api/orders', async (req, res) => {
   try {
     const {
@@ -589,13 +649,11 @@ app.post('/api/orders', async (req, res) => {
       customerName,
       customerPhone,
       deliveryLocation,
-      paymentIntentId,
+      paymentId,
     } = req.body;
 
-    // Generate order number
     const orderNumber = `WK${Date.now().toString().slice(-8)}`;
 
-    // Save to Supabase if configured
     if (supabase) {
       try {
         await supabase.from('orders').insert({
@@ -608,18 +666,13 @@ app.post('/api/orders', async (req, res) => {
           customer_name: customerName,
           customer_phone: customerPhone,
           delivery_location: deliveryLocation,
-          payment_intent_id: paymentIntentId,
+          payment_intent_id: paymentId,
           status: 'pending',
         });
       } catch (error) {
         console.error('Database error:', error);
       }
     }
-
-    // Format items for email
-    const itemsList = items
-      .map((item) => `- ${item.name} x${item.quantity} @ $${(item.price * item.quantity).toFixed(2)}`)
-      .join('\n');
 
     // Print receipt if PrintNode configured
     if (supabase) {
@@ -659,6 +712,10 @@ app.post('/api/orders', async (req, res) => {
     // Send email via Resend
     if (process.env.RESEND_API_KEY && process.env.RESTAURANT_EMAIL) {
       try {
+        const itemsList = items
+          .map((item) => `- ${item.name} x${item.quantity} @ $${(item.price * item.quantity).toFixed(2)}`)
+          .join('\n');
+
         await resend.emails.send({
           from: 'orders@walters-kitchen.local',
           to: process.env.RESTAURANT_EMAIL,
@@ -679,7 +736,7 @@ app.post('/api/orders', async (req, res) => {
             <p>Tax (8.25%): $${tax.toFixed(2)}</p>
             <p><strong>Total: $${total.toFixed(2)}</strong></p>
 
-            <p>Payment Intent: ${paymentIntentId}</p>
+            <p>Payment ID: ${paymentId}</p>
           `,
         });
         console.log(`Email sent for order ${orderNumber}`);
@@ -698,7 +755,6 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// Get Order Status
 app.get('/api/orders/:orderNumber', async (req, res) => {
   try {
     const { orderNumber } = req.params;
@@ -724,31 +780,6 @@ app.get('/api/orders/:orderNumber', async (req, res) => {
   }
 });
 
-// ============ STRIPE WEBHOOK ============
-
-app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret) {
-    return res.json({ received: true });
-  }
-
-  try {
-    const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-
-    if (event.type === 'payment_intent.succeeded') {
-      const paymentIntent = event.data.object;
-      console.log(`Payment succeeded: ${paymentIntent.id}`);
-    }
-
-    res.json({ received: true });
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(400).json({ error: 'Webhook error' });
-  }
-});
-
 // Error handling
 app.use((err, req, res, next) => {
   console.error(err);
@@ -758,4 +789,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Walter's Kitchen API running on port ${PORT}`);
   console.log(`Supabase: ${supabase ? 'Connected' : 'Not configured'}`);
+  console.log(`Square Environment: ${process.env.SQUARE_ENVIRONMENT || 'sandbox'}`);
 });

@@ -9,7 +9,7 @@ export default function Admin() {
   const [activeTab, setActiveTab] = useState('menu')
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
-  const [stripeStatus, setStripeStatus] = useState(null)
+  const [squareStatus, setSquareStatus] = useState(null)
   const [settings, setSettings] = useState({})
   const [loading, setLoading] = useState(false)
 
@@ -50,16 +50,16 @@ export default function Admin() {
     try {
       const headers = { 'x-admin-password': pwd }
 
-      const [catRes, itemRes, stripeRes, settingsRes] = await Promise.all([
+      const [catRes, itemRes, squareRes, settingsRes] = await Promise.all([
         fetch(`${API_URL}/admin/categories`, { headers }),
         fetch(`${API_URL}/admin/items`, { headers }),
-        fetch(`${API_URL}/admin/stripe/status`, { headers }),
+        fetch(`${API_URL}/admin/square/status`, { headers }),
         fetch(`${API_URL}/admin/settings`, { headers }),
       ])
 
       if (catRes.ok) setCategories(await catRes.json())
       if (itemRes.ok) setItems(await itemRes.json())
-      if (stripeRes.ok) setStripeStatus(await stripeRes.json())
+      if (squareRes.ok) setSquareStatus(await squareRes.json())
       if (settingsRes.ok) setSettings(await settingsRes.json())
     } catch (err) {
       console.error('Load error:', err)
@@ -162,7 +162,7 @@ export default function Admin() {
           />
         ) : activeTab === 'payments' ? (
           <PaymentsManager
-            stripeStatus={stripeStatus}
+            squareStatus={squareStatus}
             password={password}
             onRefresh={() => loadData(password)}
           />
@@ -391,29 +391,76 @@ function MenuManager({ categories, items, password, onRefresh }) {
 }
 
 // Payments Manager Component
-function PaymentsManager({ stripeStatus, password, onRefresh }) {
+function PaymentsManager({ squareStatus, password, onRefresh }) {
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const API_URL = import.meta.env.VITE_API_URL || '/api'
 
-  const connectStripe = async () => {
+  // Check for OAuth callback on mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const code = urlParams.get('code')
+    const state = urlParams.get('state')
+
+    if (code && state) {
+      // Handle OAuth callback
+      handleOAuthCallback(code, state)
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
+  const handleOAuthCallback = async (code, state) => {
     setLoading(true)
+    setError('')
     try {
-      const res = await fetch(`${API_URL}/admin/stripe/connect`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-password': password,
-        },
-        body: JSON.stringify({
-          return_url: window.location.href,
-        }),
+      const res = await fetch(`${API_URL}/admin/square/callback?code=${code}&state=${state}`, {
+        headers: { 'x-admin-password': password },
+      })
+      const data = await res.json()
+      if (data.success) {
+        onRefresh()
+      } else {
+        setError(data.error || 'Failed to connect Square account')
+      }
+    } catch (err) {
+      console.error('OAuth callback error:', err)
+      setError('Failed to complete Square connection')
+    }
+    setLoading(false)
+  }
+
+  const connectSquare = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}/admin/square/auth-url`, {
+        headers: { 'x-admin-password': password },
       })
       const data = await res.json()
       if (data.url) {
         window.location.href = data.url
+      } else {
+        setError(data.error || 'Failed to get authorization URL')
       }
     } catch (err) {
-      console.error('Stripe connect error:', err)
+      console.error('Square connect error:', err)
+      setError('Failed to initiate Square connection')
+    }
+    setLoading(false)
+  }
+
+  const disconnectSquare = async () => {
+    if (!confirm('Are you sure you want to disconnect Square?')) return
+    setLoading(true)
+    try {
+      await fetch(`${API_URL}/admin/square/disconnect`, {
+        method: 'POST',
+        headers: { 'x-admin-password': password },
+      })
+      onRefresh()
+    } catch (err) {
+      console.error('Disconnect error:', err)
     }
     setLoading(false)
   }
@@ -421,40 +468,44 @@ function PaymentsManager({ stripeStatus, password, onRefresh }) {
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold mb-4">Stripe Connect</h2>
+        <h2 className="text-lg font-semibold mb-4">Square Payments</h2>
         <p className="text-gray-600 mb-4">
-          Connect the restaurant owner's Stripe account to receive payments directly.
+          Connect the restaurant owner's Square account to receive payments directly.
           The kiosk fee ($3.00) will be sent to your platform account.
         </p>
 
-        {stripeStatus?.connected ? (
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700">{error}</p>
+          </div>
+        )}
+
+        {squareStatus?.connected ? (
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-green-600">
               <span className="text-xl">✓</span>
-              <span className="font-medium">Stripe Connected</span>
+              <span className="font-medium">Square Connected</span>
             </div>
             <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
-              <p><strong>Account ID:</strong> {stripeStatus.accountId}</p>
-              <p><strong>Charges Enabled:</strong> {stripeStatus.chargesEnabled ? 'Yes' : 'No'}</p>
-              <p><strong>Payouts Enabled:</strong> {stripeStatus.payoutsEnabled ? 'Yes' : 'No'}</p>
+              <p><strong>Merchant ID:</strong> {squareStatus.merchantId}</p>
+              <p><strong>Business Name:</strong> {squareStatus.businessName || 'N/A'}</p>
+              <p><strong>Location ID:</strong> {squareStatus.locationId || 'N/A'}</p>
             </div>
-            {!stripeStatus.chargesEnabled && (
-              <button
-                onClick={connectStripe}
-                disabled={loading}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium"
-              >
-                {loading ? 'Loading...' : 'Complete Setup'}
-              </button>
-            )}
+            <button
+              onClick={disconnectSquare}
+              disabled={loading}
+              className="px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50"
+            >
+              {loading ? 'Disconnecting...' : 'Disconnect Square'}
+            </button>
           </div>
         ) : (
           <button
-            onClick={connectStripe}
+            onClick={connectSquare}
             disabled={loading}
             className="px-6 py-3 bg-wk-red text-white rounded-lg font-semibold"
           >
-            {loading ? 'Loading...' : 'Connect Stripe Account'}
+            {loading ? 'Loading...' : 'Connect Square Account'}
           </button>
         )}
       </div>
@@ -464,11 +515,21 @@ function PaymentsManager({ stripeStatus, password, onRefresh }) {
         <div className="space-y-3 text-gray-600">
           <p>When a customer pays:</p>
           <ul className="list-disc list-inside space-y-1 ml-4">
-            <li>Food cost goes to the restaurant owner's Stripe account</li>
+            <li>Food cost goes to the restaurant owner's Square account</li>
             <li>Kiosk fee ($3.00) goes to your platform account</li>
-            <li>Stripe fees are deducted automatically</li>
+            <li>Square fees (2.6% + $0.10) are deducted automatically</li>
           </ul>
         </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4">Setup Instructions</h2>
+        <ol className="list-decimal list-inside space-y-2 text-gray-600">
+          <li>Click "Connect Square Account" above</li>
+          <li>Log in with the restaurant owner's Square account</li>
+          <li>Authorize the kiosk application</li>
+          <li>You'll be redirected back here when complete</li>
+        </ol>
       </div>
     </div>
   )
