@@ -1,0 +1,456 @@
+import { useState, useEffect } from 'react'
+
+const API_URL = import.meta.env.VITE_API_URL || '/api'
+
+export default function Admin() {
+  const [authenticated, setAuthenticated] = useState(false)
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [activeTab, setActiveTab] = useState('menu')
+  const [categories, setCategories] = useState([])
+  const [items, setItems] = useState([])
+  const [stripeStatus, setStripeStatus] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  // Check if already authenticated
+  useEffect(() => {
+    const savedPassword = localStorage.getItem('adminPassword')
+    if (savedPassword) {
+      setPassword(savedPassword)
+      verifyPassword(savedPassword)
+    }
+  }, [])
+
+  const verifyPassword = async (pwd) => {
+    try {
+      const res = await fetch(`${API_URL}/admin/categories`, {
+        headers: { 'x-admin-password': pwd }
+      })
+      if (res.ok) {
+        setAuthenticated(true)
+        localStorage.setItem('adminPassword', pwd)
+        loadData(pwd)
+      } else {
+        setError('Invalid password')
+        localStorage.removeItem('adminPassword')
+      }
+    } catch (err) {
+      setError('Connection error')
+    }
+  }
+
+  const handleLogin = (e) => {
+    e.preventDefault()
+    verifyPassword(password)
+  }
+
+  const loadData = async (pwd) => {
+    setLoading(true)
+    try {
+      const headers = { 'x-admin-password': pwd }
+
+      const [catRes, itemRes, stripeRes] = await Promise.all([
+        fetch(`${API_URL}/admin/categories`, { headers }),
+        fetch(`${API_URL}/admin/items`, { headers }),
+        fetch(`${API_URL}/admin/stripe/status`, { headers }),
+      ])
+
+      if (catRes.ok) setCategories(await catRes.json())
+      if (itemRes.ok) setItems(await itemRes.json())
+      if (stripeRes.ok) setStripeStatus(await stripeRes.json())
+    } catch (err) {
+      console.error('Load error:', err)
+    }
+    setLoading(false)
+  }
+
+  const logout = () => {
+    localStorage.removeItem('adminPassword')
+    setAuthenticated(false)
+    setPassword('')
+  }
+
+  // Login screen
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
+          <h1 className="text-2xl font-bold text-center mb-6">Admin Login</h1>
+          <form onSubmit={handleLogin}>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter admin password"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg mb-4 text-lg"
+              autoFocus
+            />
+            {error && <p className="text-red-600 mb-4">{error}</p>}
+            <button
+              type="submit"
+              className="w-full bg-wk-red text-white py-3 rounded-lg font-semibold text-lg hover:bg-red-700"
+            >
+              Login
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      {/* Header */}
+      <div className="bg-wk-header text-white px-6 py-4">
+        <div className="flex justify-between items-center max-w-6xl mx-auto">
+          <h1 className="text-xl font-bold">Walter's Kitchen Admin</h1>
+          <button onClick={logout} className="text-sm hover:underline">
+            Logout
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="bg-white border-b">
+        <div className="max-w-6xl mx-auto flex">
+          <button
+            onClick={() => setActiveTab('menu')}
+            className={`px-6 py-4 font-medium ${
+              activeTab === 'menu'
+                ? 'text-wk-red border-b-2 border-wk-red'
+                : 'text-gray-600'
+            }`}
+          >
+            Menu
+          </button>
+          <button
+            onClick={() => setActiveTab('payments')}
+            className={`px-6 py-4 font-medium ${
+              activeTab === 'payments'
+                ? 'text-wk-red border-b-2 border-wk-red'
+                : 'text-gray-600'
+            }`}
+          >
+            Payments
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-w-6xl mx-auto p-6">
+        {loading ? (
+          <div className="text-center py-12">Loading...</div>
+        ) : activeTab === 'menu' ? (
+          <MenuManager
+            categories={categories}
+            items={items}
+            password={password}
+            onRefresh={() => loadData(password)}
+          />
+        ) : (
+          <PaymentsManager
+            stripeStatus={stripeStatus}
+            password={password}
+            onRefresh={() => loadData(password)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Menu Manager Component
+function MenuManager({ categories, items, password, onRefresh }) {
+  const [editingCategory, setEditingCategory] = useState(null)
+  const [editingItem, setEditingItem] = useState(null)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [newItem, setNewItem] = useState({ name: '', price: '', category_id: '' })
+
+  const API_URL = import.meta.env.VITE_API_URL || '/api'
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-admin-password': password,
+  }
+
+  const addCategory = async () => {
+    if (!newCategoryName.trim()) return
+    await fetch(`${API_URL}/admin/categories`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: newCategoryName, sort_order: categories.length }),
+    })
+    setNewCategoryName('')
+    onRefresh()
+  }
+
+  const deleteCategory = async (id) => {
+    if (!confirm('Delete this category and all its items?')) return
+    await fetch(`${API_URL}/admin/categories/${id}`, { method: 'DELETE', headers })
+    onRefresh()
+  }
+
+  const addItem = async () => {
+    if (!newItem.name || !newItem.price || !newItem.category_id) return
+    await fetch(`${API_URL}/admin/items`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        ...newItem,
+        price: parseFloat(newItem.price),
+        sort_order: items.filter(i => i.category_id === newItem.category_id).length,
+      }),
+    })
+    setNewItem({ name: '', price: '', category_id: '' })
+    onRefresh()
+  }
+
+  const updateItem = async (id, updates) => {
+    await fetch(`${API_URL}/admin/items/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
+    })
+    setEditingItem(null)
+    onRefresh()
+  }
+
+  const deleteItem = async (id) => {
+    if (!confirm('Delete this item?')) return
+    await fetch(`${API_URL}/admin/items/${id}`, { method: 'DELETE', headers })
+    onRefresh()
+  }
+
+  const toggleItemAvailable = async (item) => {
+    await updateItem(item.id, { ...item, available: !item.available })
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Add Category */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4">Add Category</h2>
+        <div className="flex gap-4">
+          <input
+            type="text"
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+            placeholder="Category name"
+            className="flex-1 px-4 py-2 border rounded-lg"
+          />
+          <button
+            onClick={addCategory}
+            className="px-6 py-2 bg-wk-red text-white rounded-lg font-medium"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* Add Item */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4">Add Menu Item</h2>
+        <div className="flex gap-4 flex-wrap">
+          <select
+            value={newItem.category_id}
+            onChange={(e) => setNewItem({ ...newItem, category_id: e.target.value })}
+            className="px-4 py-2 border rounded-lg"
+          >
+            <option value="">Select category</option>
+            {categories.map(cat => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={newItem.name}
+            onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+            placeholder="Item name"
+            className="flex-1 px-4 py-2 border rounded-lg min-w-[200px]"
+          />
+          <input
+            type="number"
+            step="0.01"
+            value={newItem.price}
+            onChange={(e) => setNewItem({ ...newItem, price: e.target.value })}
+            placeholder="Price"
+            className="w-24 px-4 py-2 border rounded-lg"
+          />
+          <button
+            onClick={addItem}
+            className="px-6 py-2 bg-wk-red text-white rounded-lg font-medium"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* Categories & Items */}
+      {categories.map(category => (
+        <div key={category.id} className="bg-white rounded-lg shadow">
+          <div className="px-6 py-4 border-b flex justify-between items-center">
+            <h3 className="text-lg font-semibold">{category.name}</h3>
+            <button
+              onClick={() => deleteCategory(category.id)}
+              className="text-red-600 text-sm hover:underline"
+            >
+              Delete Category
+            </button>
+          </div>
+          <div className="divide-y">
+            {items
+              .filter(item => item.category_id === category.id)
+              .map(item => (
+                <div key={item.id} className="px-6 py-3 flex items-center gap-4">
+                  {editingItem === item.id ? (
+                    <>
+                      <input
+                        type="text"
+                        defaultValue={item.name}
+                        id={`name-${item.id}`}
+                        className="flex-1 px-3 py-1 border rounded"
+                      />
+                      <input
+                        type="number"
+                        step="0.01"
+                        defaultValue={item.price}
+                        id={`price-${item.id}`}
+                        className="w-24 px-3 py-1 border rounded"
+                      />
+                      <button
+                        onClick={() => {
+                          const name = document.getElementById(`name-${item.id}`).value
+                          const price = parseFloat(document.getElementById(`price-${item.id}`).value)
+                          updateItem(item.id, { ...item, name, price })
+                        }}
+                        className="text-green-600 font-medium"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setEditingItem(null)}
+                        className="text-gray-500"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className={`flex-1 ${!item.available ? 'text-gray-400 line-through' : ''}`}>
+                        {item.name}
+                      </span>
+                      <span className="text-gray-600">${parseFloat(item.price).toFixed(2)}</span>
+                      <button
+                        onClick={() => toggleItemAvailable(item)}
+                        className={`text-sm ${item.available ? 'text-green-600' : 'text-gray-400'}`}
+                      >
+                        {item.available ? 'Available' : 'Hidden'}
+                      </button>
+                      <button
+                        onClick={() => setEditingItem(item.id)}
+                        className="text-blue-600 text-sm"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteItem(item.id)}
+                        className="text-red-600 text-sm"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            {items.filter(i => i.category_id === category.id).length === 0 && (
+              <div className="px-6 py-4 text-gray-400 text-sm">No items in this category</div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Payments Manager Component
+function PaymentsManager({ stripeStatus, password, onRefresh }) {
+  const [loading, setLoading] = useState(false)
+  const API_URL = import.meta.env.VITE_API_URL || '/api'
+
+  const connectStripe = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_URL}/admin/stripe/connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-password': password,
+        },
+        body: JSON.stringify({
+          return_url: window.location.href,
+        }),
+      })
+      const data = await res.json()
+      if (data.url) {
+        window.location.href = data.url
+      }
+    } catch (err) {
+      console.error('Stripe connect error:', err)
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4">Stripe Connect</h2>
+        <p className="text-gray-600 mb-4">
+          Connect the restaurant owner's Stripe account to receive payments directly.
+          The kiosk fee ($3.00) will be sent to your platform account.
+        </p>
+
+        {stripeStatus?.connected ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-green-600">
+              <span className="text-xl">✓</span>
+              <span className="font-medium">Stripe Connected</span>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+              <p><strong>Account ID:</strong> {stripeStatus.accountId}</p>
+              <p><strong>Charges Enabled:</strong> {stripeStatus.chargesEnabled ? 'Yes' : 'No'}</p>
+              <p><strong>Payouts Enabled:</strong> {stripeStatus.payoutsEnabled ? 'Yes' : 'No'}</p>
+            </div>
+            {!stripeStatus.chargesEnabled && (
+              <button
+                onClick={connectStripe}
+                disabled={loading}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium"
+              >
+                {loading ? 'Loading...' : 'Complete Setup'}
+              </button>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={connectStripe}
+            disabled={loading}
+            className="px-6 py-3 bg-wk-red text-white rounded-lg font-semibold"
+          >
+            {loading ? 'Loading...' : 'Connect Stripe Account'}
+          </button>
+        )}
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4">How Split Payments Work</h2>
+        <div className="space-y-3 text-gray-600">
+          <p>When a customer pays:</p>
+          <ul className="list-disc list-inside space-y-1 ml-4">
+            <li>Food cost goes to the restaurant owner's Stripe account</li>
+            <li>Kiosk fee ($3.00) goes to your platform account</li>
+            <li>Stripe fees are deducted automatically</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  )
+}

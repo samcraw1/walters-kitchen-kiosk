@@ -3,14 +3,41 @@ import MenuCategories from './components/MenuCategories'
 import Cart from './components/Cart'
 import Checkout from './components/Checkout'
 import OrderConfirmation from './components/OrderConfirmation'
-import { menuData } from './data/menu'
+
+const API_URL = import.meta.env.VITE_API_URL || '/api'
 
 export default function App() {
-  const [selectedCategory, setSelectedCategory] = useState('Appetizers')
+  const [menuData, setMenuData] = useState({})
+  const [menuLoading, setMenuLoading] = useState(true)
+  const [menuError, setMenuError] = useState(null)
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [cart, setCart] = useState([])
   const [showCheckout, setShowCheckout] = useState(false)
   const [orderConfirmation, setOrderConfirmation] = useState(null)
   const [showMobileCart, setShowMobileCart] = useState(false)
+
+  // Fetch menu from API
+  useEffect(() => {
+    const fetchMenu = async () => {
+      try {
+        const res = await fetch(`${API_URL}/menu`)
+        if (!res.ok) throw new Error('Failed to load menu')
+        const data = await res.json()
+        setMenuData(data)
+        // Set first category as selected
+        const categories = Object.keys(data)
+        if (categories.length > 0) {
+          setSelectedCategory(categories[0])
+        }
+      } catch (err) {
+        console.error('Menu fetch error:', err)
+        setMenuError('Unable to load menu. Please try again.')
+      } finally {
+        setMenuLoading(false)
+      }
+    }
+    fetchMenu()
+  }, [])
 
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
 
@@ -52,6 +79,35 @@ export default function App() {
     setOrderConfirmation(orderNumber)
     setShowCheckout(false)
     setCart([])
+  }
+
+  // Loading state
+  if (menuLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="spinner mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading menu...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Error state
+  if (menuError) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{menuError}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-6 py-2 bg-wk-red text-white rounded-lg"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (orderConfirmation) {
