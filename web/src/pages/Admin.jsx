@@ -10,6 +10,7 @@ export default function Admin() {
   const [categories, setCategories] = useState([])
   const [items, setItems] = useState([])
   const [stripeStatus, setStripeStatus] = useState(null)
+  const [settings, setSettings] = useState({})
   const [loading, setLoading] = useState(false)
 
   // Check if already authenticated
@@ -49,15 +50,17 @@ export default function Admin() {
     try {
       const headers = { 'x-admin-password': pwd }
 
-      const [catRes, itemRes, stripeRes] = await Promise.all([
+      const [catRes, itemRes, stripeRes, settingsRes] = await Promise.all([
         fetch(`${API_URL}/admin/categories`, { headers }),
         fetch(`${API_URL}/admin/items`, { headers }),
         fetch(`${API_URL}/admin/stripe/status`, { headers }),
+        fetch(`${API_URL}/admin/settings`, { headers }),
       ])
 
       if (catRes.ok) setCategories(await catRes.json())
       if (itemRes.ok) setItems(await itemRes.json())
       if (stripeRes.ok) setStripeStatus(await stripeRes.json())
+      if (settingsRes.ok) setSettings(await settingsRes.json())
     } catch (err) {
       console.error('Load error:', err)
     }
@@ -133,6 +136,16 @@ export default function Admin() {
           >
             Payments
           </button>
+          <button
+            onClick={() => setActiveTab('printing')}
+            className={`px-6 py-4 font-medium ${
+              activeTab === 'printing'
+                ? 'text-wk-red border-b-2 border-wk-red'
+                : 'text-gray-600'
+            }`}
+          >
+            Printing
+          </button>
         </div>
       </div>
 
@@ -147,9 +160,15 @@ export default function Admin() {
             password={password}
             onRefresh={() => loadData(password)}
           />
-        ) : (
+        ) : activeTab === 'payments' ? (
           <PaymentsManager
             stripeStatus={stripeStatus}
+            password={password}
+            onRefresh={() => loadData(password)}
+          />
+        ) : (
+          <PrintingManager
+            settings={settings}
             password={password}
             onRefresh={() => loadData(password)}
           />
@@ -450,6 +469,207 @@ function PaymentsManager({ stripeStatus, password, onRefresh }) {
             <li>Stripe fees are deducted automatically</li>
           </ul>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// Printing Manager Component
+function PrintingManager({ settings, password, onRefresh }) {
+  const [apiKey, setApiKey] = useState(settings.printnode_api_key || '')
+  const [printerId, setPrinterId] = useState(settings.printnode_printer_id || '')
+  const [printers, setPrinters] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [testStatus, setTestStatus] = useState(null)
+  const API_URL = import.meta.env.VITE_API_URL || '/api'
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-admin-password': password,
+  }
+
+  const saveApiKey = async () => {
+    setLoading(true)
+    try {
+      await fetch(`${API_URL}/admin/settings/printnode_api_key`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ value: apiKey }),
+      })
+      onRefresh()
+      // Fetch printers after saving API key
+      fetchPrinters()
+    } catch (err) {
+      console.error('Save error:', err)
+    }
+    setLoading(false)
+  }
+
+  const savePrinterId = async () => {
+    setLoading(true)
+    try {
+      await fetch(`${API_URL}/admin/settings/printnode_printer_id`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ value: printerId }),
+      })
+      onRefresh()
+    } catch (err) {
+      console.error('Save error:', err)
+    }
+    setLoading(false)
+  }
+
+  const fetchPrinters = async () => {
+    try {
+      const res = await fetch(`${API_URL}/admin/print/printers`, { headers })
+      if (res.ok) {
+        setPrinters(await res.json())
+      }
+    } catch (err) {
+      console.error('Fetch printers error:', err)
+    }
+  }
+
+  const testPrint = async () => {
+    setLoading(true)
+    setTestStatus(null)
+    try {
+      const res = await fetch(`${API_URL}/admin/print/test`, {
+        method: 'POST',
+        headers,
+      })
+      if (res.ok) {
+        setTestStatus({ success: true, message: 'Test receipt sent to printer!' })
+      } else {
+        const data = await res.json()
+        setTestStatus({ success: false, message: data.error || 'Print failed' })
+      }
+    } catch (err) {
+      setTestStatus({ success: false, message: 'Connection error' })
+    }
+    setLoading(false)
+  }
+
+  // Fetch printers on load if API key exists
+  useState(() => {
+    if (settings.printnode_api_key) {
+      fetchPrinters()
+    }
+  }, [settings.printnode_api_key])
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4">PrintNode Setup</h2>
+        <p className="text-gray-600 mb-4">
+          Connect to PrintNode to automatically print order receipts at the restaurant.
+        </p>
+
+        <div className="space-y-4">
+          {/* API Key */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              PrintNode API Key
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter PrintNode API key"
+                className="flex-1 px-4 py-2 border rounded-lg"
+              />
+              <button
+                onClick={saveApiKey}
+                disabled={loading}
+                className="px-4 py-2 bg-wk-red text-white rounded-lg"
+              >
+                Save
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mt-1">
+              Get your API key from{' '}
+              <a href="https://app.printnode.com/account/apikey" target="_blank" rel="noopener" className="text-blue-600 underline">
+                PrintNode Dashboard
+              </a>
+            </p>
+          </div>
+
+          {/* Printer Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Printer ID
+            </label>
+            <div className="flex gap-2">
+              {printers.length > 0 ? (
+                <select
+                  value={printerId}
+                  onChange={(e) => setPrinterId(e.target.value)}
+                  className="flex-1 px-4 py-2 border rounded-lg"
+                >
+                  <option value="">Select a printer</option>
+                  {printers.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={printerId}
+                  onChange={(e) => setPrinterId(e.target.value)}
+                  placeholder="Enter Printer ID"
+                  className="flex-1 px-4 py-2 border rounded-lg"
+                />
+              )}
+              <button
+                onClick={savePrinterId}
+                disabled={loading}
+                className="px-4 py-2 bg-wk-red text-white rounded-lg"
+              >
+                Save
+              </button>
+            </div>
+            {printers.length === 0 && settings.printnode_api_key && (
+              <button
+                onClick={fetchPrinters}
+                className="text-sm text-blue-600 underline mt-1"
+              >
+                Load printers
+              </button>
+            )}
+          </div>
+
+          {/* Test Print */}
+          {settings.printnode_api_key && settings.printnode_printer_id && (
+            <div className="pt-4 border-t">
+              <button
+                onClick={testPrint}
+                disabled={loading}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium"
+              >
+                {loading ? 'Printing...' : 'Test Print'}
+              </button>
+              {testStatus && (
+                <p className={`mt-2 ${testStatus.success ? 'text-green-600' : 'text-red-600'}`}>
+                  {testStatus.message}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4">Setup Instructions</h2>
+        <ol className="list-decimal list-inside space-y-2 text-gray-600">
+          <li>Create a <a href="https://www.printnode.com" target="_blank" rel="noopener" className="text-blue-600 underline">PrintNode account</a> ($10/month)</li>
+          <li>Download and install the PrintNode client on the restaurant computer</li>
+          <li>Connect the receipt printer to that computer</li>
+          <li>Get your API key from the PrintNode dashboard</li>
+          <li>Enter the API key above and select your printer</li>
+          <li>Click "Test Print" to verify it works</li>
+        </ol>
       </div>
     </div>
   )

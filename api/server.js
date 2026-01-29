@@ -406,6 +406,175 @@ app.post('/api/create-payment-intent', async (req, res) => {
   }
 });
 
+// ============ PRINTNODE ENDPOINTS ============
+
+// Generate receipt text
+function generateReceipt(order) {
+  const { orderNumber, items, subtotal, tax, kioskFee, total, customerName, customerPhone, deliveryLocation } = order;
+  const date = new Date().toLocaleString('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  });
+
+  let receipt = `
+================================
+    WALTER'S KITCHEN
+    Food Ordering Kiosk
+================================
+
+Order #: ${orderNumber}
+Date: ${date}
+
+Customer: ${customerName || 'Guest'}
+Phone: ${customerPhone || 'N/A'}
+Location: ${deliveryLocation || 'N/A'}
+
+--------------------------------
+ITEMS:
+--------------------------------
+`;
+
+  items.forEach(item => {
+    const itemTotal = (item.price * item.quantity).toFixed(2);
+    const line = `${item.quantity}x ${item.name}`;
+    const padding = 32 - line.length - itemTotal.length - 1;
+    receipt += `${line}${' '.repeat(Math.max(1, padding))}$${itemTotal}\n`;
+  });
+
+  receipt += `
+--------------------------------
+Subtotal:${' '.repeat(14)}$${subtotal.toFixed(2)}
+Kiosk Fee:${' '.repeat(13)}$${kioskFee.toFixed(2)}
+Tax (8.25%):${' '.repeat(11)}$${tax.toFixed(2)}
+--------------------------------
+TOTAL:${' '.repeat(17)}$${total.toFixed(2)}
+================================
+        THANK YOU!
+================================
+`;
+
+  return receipt;
+}
+
+// Send print job to PrintNode
+async function sendPrintJob(receipt, printNodeApiKey, printerId) {
+  if (!printNodeApiKey || !printerId) {
+    console.log('PrintNode not configured, skipping print');
+    return null;
+  }
+
+  try {
+    const response = await fetch('https://api.printnode.com/printjobs', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(printNodeApiKey + ':').toString('base64')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        printerId: parseInt(printerId),
+        title: 'Order Receipt',
+        contentType: 'raw_base64',
+        content: Buffer.from(receipt).toString('base64'),
+        source: 'Walters Kitchen Kiosk',
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('PrintNode error:', error);
+      return null;
+    }
+
+    const result = await response.json();
+    console.log('Print job created:', result);
+    return result;
+  } catch (error) {
+    console.error('PrintNode request error:', error);
+    return null;
+  }
+}
+
+// Test print endpoint
+app.post('/api/admin/print/test', adminAuth, async (req, res) => {
+  try {
+    // Get PrintNode settings
+    const { data: settings } = await supabase
+      .from('kiosk_settings')
+      .select('*');
+
+    let printNodeApiKey = null;
+    let printerId = null;
+
+    settings?.forEach(s => {
+      if (s.setting_key === 'printnode_api_key') printNodeApiKey = s.setting_value;
+      if (s.setting_key === 'printnode_printer_id') printerId = s.setting_value;
+    });
+
+    if (!printNodeApiKey || !printerId) {
+      return res.status(400).json({ error: 'PrintNode not configured' });
+    }
+
+    // Generate test receipt
+    const testOrder = {
+      orderNumber: 'TEST001',
+      items: [
+        { name: 'Test Item 1', price: 10.00, quantity: 2 },
+        { name: 'Test Item 2', price: 5.50, quantity: 1 },
+      ],
+      subtotal: 25.50,
+      tax: 2.35,
+      kioskFee: 3.00,
+      total: 30.85,
+      customerName: 'Test Customer',
+      customerPhone: '(555) 123-4567',
+      deliveryLocation: 'Table 1',
+    };
+
+    const receipt = generateReceipt(testOrder);
+    const result = await sendPrintJob(receipt, printNodeApiKey, printerId);
+
+    if (result) {
+      res.json({ success: true, printJobId: result });
+    } else {
+      res.status(500).json({ error: 'Failed to send print job' });
+    }
+  } catch (error) {
+    console.error('Test print error:', error);
+    res.status(500).json({ error: 'Test print failed' });
+  }
+});
+
+// Get PrintNode printers (to help user find printer ID)
+app.get('/api/admin/print/printers', adminAuth, async (req, res) => {
+  try {
+    const { data: settings } = await supabase
+      .from('kiosk_settings')
+      .select('setting_value')
+      .eq('setting_key', 'printnode_api_key')
+      .single();
+
+    if (!settings?.setting_value) {
+      return res.status(400).json({ error: 'PrintNode API key not configured' });
+    }
+
+    const response = await fetch('https://api.printnode.com/printers', {
+      headers: {
+        'Authorization': `Basic ${Buffer.from(settings.setting_value + ':').toString('base64')}`,
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(400).json({ error: 'Failed to fetch printers' });
+    }
+
+    const printers = await response.json();
+    res.json(printers.map(p => ({ id: p.id, name: p.name, description: p.description })));
+  } catch (error) {
+    console.error('Fetch printers error:', error);
+    res.status(500).json({ error: 'Failed to fetch printers' });
+  }
+});
+
 // ============ ORDER ENDPOINTS ============
 
 // Create Order
@@ -451,6 +620,41 @@ app.post('/api/orders', async (req, res) => {
     const itemsList = items
       .map((item) => `- ${item.name} x${item.quantity} @ $${(item.price * item.quantity).toFixed(2)}`)
       .join('\n');
+
+    // Print receipt if PrintNode configured
+    if (supabase) {
+      try {
+        const { data: settings } = await supabase
+          .from('kiosk_settings')
+          .select('*');
+
+        let printNodeApiKey = null;
+        let printerId = null;
+
+        settings?.forEach(s => {
+          if (s.setting_key === 'printnode_api_key') printNodeApiKey = s.setting_value;
+          if (s.setting_key === 'printnode_printer_id') printerId = s.setting_value;
+        });
+
+        if (printNodeApiKey && printerId) {
+          const receipt = generateReceipt({
+            orderNumber,
+            items,
+            subtotal,
+            tax,
+            kioskFee,
+            total,
+            customerName,
+            customerPhone,
+            deliveryLocation,
+          });
+          await sendPrintJob(receipt, printNodeApiKey, printerId);
+          console.log(`Receipt printed for order ${orderNumber}`);
+        }
+      } catch (printError) {
+        console.error('Print error:', printError);
+      }
+    }
 
     // Send email via Resend
     if (process.env.RESEND_API_KEY && process.env.RESTAURANT_EMAIL) {
